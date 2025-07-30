@@ -19,7 +19,6 @@ class SupabaseConfig {
         url: AppConstants.supabaseUrl,
         anonKey: AppConstants.supabaseAnonKey,
         debug: true, // Activé pour debug
-        httpOptions: const HttpClientOptions(),
       );
       _client = Supabase.instance.client;
       print('✅ Supabase initialized successfully');

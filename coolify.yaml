@@ -1,0 +1,81 @@
+# Coolify Configuration for Flutter Flight Compensation App
+# This file defines how Coolify should deploy and manage your application
+
+services:
+  flutter-flight-app:
+    # Application metadata
+    name: "Flight Compensation App"
+    description: "Flutter web application for flight delay/cancellation compensation claims"
+    
+    # Build configuration
+    build:
+      dockerfile: "Dockerfile"
+      context: "."
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      
+    # Container configuration
+    image: "flight-compensation-app:latest"
+    restart: "unless-stopped"
+    
+    # Port mapping
+    ports:
+      - "80:80"
+    
+    # Environment variables (production)
+    environment:
+      - FLUTTER_ENV=production
+      - FLUTTER_APP_NAME=Flight Compensation
+      - FLUTTER_APP_VERSION=1.0.0
+      - WEB_RENDERER=canvaskit
+      - TREE_SHAKE_ICONS=true
+      # Supabase credentials should be set in Coolify UI for security
+      # - SUPABASE_URL=${SUPABASE_URL}
+      # - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: "512M"
+          cpus: "0.5"
+        reservations:
+          memory: "256M"
+          cpus: "0.25"
+      
+      # Restart policy
+      restart_policy:
+        condition: "on-failure"
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    
+    # Labels for Coolify management
+    labels:
+      - "coolify.managed=true"
+      - "coolify.version=1.0.0"
+      - "coolify.type=application"
+      - "coolify.framework=flutter"
+      - "coolify.buildpack=docker"
+      
+    # Volumes (if needed for persistent data)
+    # volumes:
+    #   - "app_data:/app/data"
+
+# Network configuration
+networks:
+  default:
+    name: "flight-app-network"
+    
+# Volume definitions (if needed)
+# volumes:
+#   app_data:
+#     driver: local

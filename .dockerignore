@@ -1,0 +1,78 @@
+# Docker ignore file for Flutter web app
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# Documentation
+README.md
+CHANGELOG.md
+docs/
+
+# Environment files (production secrets should be injected at runtime)
+.env.local
+.env.development
+.env.test
+
+# Flutter specific
+.flutter-plugins
+.flutter-plugins-dependencies
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins-dependencies
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Node modules (if any)
+node_modules/
+
+# Coverage
+coverage/
+
+# Test
+test/
+test_driver/
+
+# Android/iOS (not needed for web deployment)
+android/
+ios/
+macos/
+windows/
+linux/
+
+# Build artifacts that shouldn't be in the image
+*.apk
+*.ipa
+*.dmg
+*.exe
+
+# Large files
+*.zip
+*.tar.gz
+*.rar
