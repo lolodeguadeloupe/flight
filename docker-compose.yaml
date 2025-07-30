@@ -1,20 +1,20 @@
-# Docker Compose for local testing before Coolify deployment
-# Use: docker-compose up --build
+# Docker Compose for Coolify deployment
+# Main service that Coolify will deploy
 
 version: '3.8'
 
 services:
-  flutter-flight-app:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         BUILDKIT_INLINE_CACHE: 1
     
-    container_name: flight-compensation-app
+    container_name: flight-app
     
     ports:
-      - "8080:80"
+      - "80:80"
     
     environment:
       - FLUTTER_ENV=production
@@ -22,9 +22,9 @@ services:
       - FLUTTER_APP_VERSION=1.0.0
       - WEB_RENDERER=canvaskit
       - TREE_SHAKE_ICONS=true
-      # Add your Supabase credentials here for local testing
-      # - SUPABASE_URL=https://your-project-ref.supabase.co
-      # - SUPABASE_ANON_KEY=your-anon-key
+      # Supabase credentials will be injected by Coolify
+      - SUPABASE_URL=${SUPABASE_URL:-https://flight-supabase.laurent-luce.com}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     
     restart: unless-stopped
     
