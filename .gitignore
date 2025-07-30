@@ -1,0 +1,29 @@
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Flutter/Dart specific
+# These are some examples of commonly ignored for Flutter projects
+/build/
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
