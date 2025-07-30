@@ -23,7 +23,7 @@ RUN flutter config --enable-web
 RUN flutter packages pub run build_runner build --delete-conflicting-outputs
 
 # Build web app for production
-RUN flutter build web --release --web-renderer canvaskit --dart-define=FLUTTER_WEB_USE_SKIA=true
+RUN flutter build web --release --web-renderer canvaskit --dart-define=FLUTTER_WEB_USE_SKIA=true --base-href /
 
 # Stage 2: Production Server
 FROM nginx:alpine AS production
