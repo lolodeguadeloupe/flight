@@ -22,8 +22,14 @@ RUN flutter config --enable-web
 # Run code generation for Freezed and JSON serialization
 RUN flutter packages pub run build_runner build --delete-conflicting-outputs
 
-# Build web app for production
-RUN flutter build web --release --web-renderer canvaskit --dart-define=FLUTTER_WEB_USE_SKIA=true --base-href /
+# Build web app for production with environment variables
+ARG SUPABASE_URL=https://flight-supabase.laurent-luce.com
+ARG SUPABASE_ANON_KEY=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc1MzgwMjIyMCwiZXhwIjo0OTA5NDc1ODIwLCJyb2xlIjoiYW5vbiJ9.SnrtmOKddGyC-5jFGajEqZTLb8Qyz9L1IhbxsQ0AfeU
+
+RUN flutter build web --release --web-renderer canvaskit --base-href / \
+    --dart-define=FLUTTER_WEB_USE_SKIA=true \
+    --dart-define=SUPABASE_URL="${SUPABASE_URL}" \
+    --dart-define=SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}"
 
 # Stage 2: Production Server
 FROM nginx:alpine AS production

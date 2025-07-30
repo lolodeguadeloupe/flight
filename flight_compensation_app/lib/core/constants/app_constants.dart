@@ -8,9 +8,7 @@ class AppConstants {
   static const Duration receiveTimeout = Duration(seconds: 30);
   
   // Supabase Configuration
-  // Note: Using HTTP for development due to self-signed SSL certificate
-  // Change to HTTPS for production with proper SSL certificate
-  static String get supabaseUrl => const String.fromEnvironment('SUPABASE_URL', defaultValue: 'http://flight-supabase.laurent-luce.com');
+  static String get supabaseUrl => const String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://flight-supabase.laurent-luce.com');
   static String get supabaseAnonKey => const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc1MzgwMjIyMCwiZXhwIjo0OTA5NDc1ODIwLCJyb2xlIjoiYW5vbiJ9.SnrtmOKddGyC-5jFGajEqZTLb8Qyz9L1IhbxsQ0AfeU');
   // Compensation Rules (EC261)
   static const Map<String, double> ec261Compensation = {
