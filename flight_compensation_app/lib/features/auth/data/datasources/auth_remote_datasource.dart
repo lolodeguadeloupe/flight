@@ -149,8 +149,8 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       emailConfirmed: user.emailConfirmedAt != null,
       displayName: user.userMetadata?['display_name'] as String?,
       avatarUrl: user.userMetadata?['avatar_url'] as String?,
-      lastSignInAt: user.lastSignInAt,
-      createdAt: user.createdAt,
+      lastSignInAt: user.lastSignInAt != null ? DateTime.parse(user.lastSignInAt!) : null,
+      createdAt: DateTime.parse(user.createdAt),
     );
   }
 

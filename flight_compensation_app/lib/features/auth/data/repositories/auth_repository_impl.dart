@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:dartz/dartz.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthUser;
 import '../../../../core/error/failures.dart';
 import '../../domain/entities/auth_user.dart';
 import '../../domain/repositories/auth_repository.dart';
@@ -25,7 +25,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException catch (e) {
       return Left(_mapAuthExceptionToFailure(e));
     } catch (e) {
-      return Left(ServerFailure('Authentication failed: ${e.toString()}'));
+      return Left(Failure.server(message: 'Authentication failed: ${e.toString()}'));
     }
   }
 
@@ -45,7 +45,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException catch (e) {
       return Left(_mapAuthExceptionToFailure(e));
     } catch (e) {
-      return Left(ServerFailure('Registration failed: ${e.toString()}'));
+      return Left(Failure.server(message: 'Registration failed: ${e.toString()}'));
     }
   }
 
@@ -57,7 +57,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException catch (e) {
       return Left(_mapAuthExceptionToFailure(e));
     } catch (e) {
-      return Left(ServerFailure('Sign out failed: ${e.toString()}'));
+      return Left(Failure.server(message: 'Sign out failed: ${e.toString()}'));
     }
   }
 
@@ -69,7 +69,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException catch (e) {
       return Left(_mapAuthExceptionToFailure(e));
     } catch (e) {
-      return Left(ServerFailure('Failed to get current user: ${e.toString()}'));
+      return Left(Failure.server(message: 'Failed to get current user: ${e.toString()}'));
     }
   }
 
@@ -81,7 +81,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException catch (e) {
       return Left(_mapAuthExceptionToFailure(e));
     } catch (e) {
-      return Left(ServerFailure('Password reset failed: ${e.toString()}'));
+      return Left(Failure.server(message: 'Password reset failed: ${e.toString()}'));
     }
   }
 
@@ -93,7 +93,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException catch (e) {
       return Left(_mapAuthExceptionToFailure(e));
     } catch (e) {
-      return Left(ServerFailure('Email confirmation failed: ${e.toString()}'));
+      return Left(Failure.server(message: 'Email confirmation failed: ${e.toString()}'));
     }
   }
 
@@ -108,19 +108,19 @@ class AuthRepositoryImpl implements AuthRepository {
     
     if (message.contains('invalid login credentials') ||
         message.contains('invalid email or password')) {
-      return const AuthFailure('Invalid email or password');
+      return const Failure.unauthorized(message: 'Invalid email or password');
     } else if (message.contains('email not confirmed')) {
-      return const AuthFailure('Please confirm your email address');
+      return const Failure.unauthorized(message: 'Please confirm your email address');
     } else if (message.contains('too many requests')) {
-      return const AuthFailure('Too many attempts. Please try again later');
+      return const Failure.unauthorized(message: 'Too many attempts. Please try again later');
     } else if (message.contains('user already registered')) {
-      return const AuthFailure('An account with this email already exists');
+      return const Failure.unauthorized(message: 'An account with this email already exists');
     } else if (message.contains('weak password')) {
-      return const AuthFailure('Password is too weak');
+      return const Failure.unauthorized(message: 'Password is too weak');
     } else if (message.contains('invalid email')) {
-      return const ValidationFailure('Invalid email format');
+      return const Failure.validation(message: 'Invalid email format');
     }
     
-    return AuthFailure(exception.message);
+    return Failure.unauthorized(message: exception.message);
   }
 }

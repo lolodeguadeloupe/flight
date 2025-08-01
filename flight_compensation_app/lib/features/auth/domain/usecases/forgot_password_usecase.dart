@@ -9,11 +9,11 @@ class ForgotPasswordUseCase {
 
   Future<Either<Failure, void>> call(String email) async {
     if (email.isEmpty) {
-      return Left(ValidationFailure('Email cannot be empty'));
+      return Left(Failure.validation(message: 'Email cannot be empty'));
     }
 
     if (!_isValidEmail(email)) {
-      return Left(ValidationFailure('Invalid email format'));
+      return Left(Failure.validation(message: 'Invalid email format'));
     }
 
     return await repository.sendPasswordResetEmail(email.trim().toLowerCase());

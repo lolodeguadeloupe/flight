@@ -1,18 +1,16 @@
 import 'package:dartz/dartz.dart';
-import 'package:dio/dio.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/repositories/claim_repository.dart';
 import '../../domain/entities/claim.dart';
 import '../../../core/error/failures.dart';
+import '../../../core/network/supabase_client.dart';
 import '../datasources/local_data_source.dart';
-import '../datasources/remote_data_source.dart';
 import '../models/claim_model.dart';
 
 class ClaimRepositoryImpl implements ClaimRepository {
-  final RemoteDataSource remoteDataSource;
   final LocalDataSource localDataSource;
 
   ClaimRepositoryImpl({
-    required this.remoteDataSource,
     required this.localDataSource,
   });
 
@@ -25,16 +23,23 @@ class ClaimRepositoryImpl implements ClaimRepository {
         return Right(cachedClaims.map((model) => model.toEntity()).toList());
       }
 
-      // Récupérer depuis l'API distante
-      final claimModels = await remoteDataSource.getUserClaims(userId);
+      // Récupérer depuis Supabase
+      final response = await SupabaseConfig.from('claims')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false);
+
+      final claimModels = response
+          .map<ClaimModel>((json) => ClaimModel.fromJson(json))
+          .toList();
       final claims = claimModels.map((model) => model.toEntity()).toList();
 
       // Mettre en cache
       await localDataSource.cacheClaims(claimModels, userId);
 
       return Right(claims);
-    } on DioException catch (e) {
-      return Left(_handleDioException(e));
+    } on PostgrestException catch (e) {
+      return Left(_handlePostgrestException(e));
     } catch (e) {
       return Left(Failure.unknown(message: 'Unexpected error: $e'));
     }
@@ -49,16 +54,21 @@ class ClaimRepositoryImpl implements ClaimRepository {
         return Right(cachedClaim.toEntity());
       }
 
-      // Récupérer depuis l'API distante
-      final claimModel = await remoteDataSource.getClaimDetails(claimId);
+      // Récupérer depuis Supabase
+      final response = await SupabaseConfig.from('claims')
+          .select()
+          .eq('id', claimId)
+          .single();
+
+      final claimModel = ClaimModel.fromJson(response);
       final claim = claimModel.toEntity();
 
       // Mettre en cache
       await localDataSource.cacheClaim(claimModel);
 
       return Right(claim);
-    } on DioException catch (e) {
-      return Left(_handleDioException(e));
+    } on PostgrestException catch (e) {
+      return Left(_handlePostgrestException(e));
     } catch (e) {
       return Left(Failure.unknown(message: 'Unexpected error: $e'));
     }
@@ -75,12 +85,28 @@ class ClaimRepositoryImpl implements ClaimRepository {
         ));
       }
 
-      // Convertir en modèle pour l'API
+      // Convertir en modèle pour Supabase
       final claimModel = ClaimModel.fromEntity(claim);
       final claimData = claimModel.toJson();
 
-      // Soumettre à l'API
-      final submittedClaimModel = await remoteDataSource.submitClaim(claimData);
+      // Ajouter l'ID utilisateur actuel et timestamp
+      final currentUser = SupabaseConfig.auth.currentUser;
+      if (currentUser == null) {
+        return const Left(Failure.unauthorized(message: 'User not authenticated'));
+      }
+
+      claimData['user_id'] = currentUser.id;
+      claimData['created_at'] = DateTime.now().toIso8601String();
+      claimData['updated_at'] = DateTime.now().toIso8601String();
+      claimData['status'] = 'pending';
+
+      // Soumettre à Supabase
+      final response = await SupabaseConfig.from('claims')
+          .insert(claimData)
+          .select()
+          .single();
+
+      final submittedClaimModel = ClaimModel.fromJson(response);
       final submittedClaim = submittedClaimModel.toEntity();
 
       // Mettre en cache la réclamation soumise
@@ -90,8 +116,10 @@ class ClaimRepositoryImpl implements ClaimRepository {
       await localDataSource.clearDraftClaim(claim.userId);
 
       return Right(submittedClaim);
-    } on DioException catch (e) {
-      return Left(_handleDioException(e));
+    } on AuthException catch (e) {
+      return Left(Failure.unauthorized(message: 'Authentication error: ${e.message}'));
+    } on PostgrestException catch (e) {
+      return Left(_handlePostgrestException(e));
     } catch (e) {
       return Left(Failure.unknown(message: 'Failed to submit claim: $e'));
     }
@@ -100,15 +128,23 @@ class ClaimRepositoryImpl implements ClaimRepository {
   @override
   Future<Either<Failure, Claim>> updateClaim(String claimId, Map<String, dynamic> updates) async {
     try {
-      final updatedClaimModel = await remoteDataSource.updateClaim(claimId, updates);
+      updates['updated_at'] = DateTime.now().toIso8601String();
+
+      final response = await SupabaseConfig.from('claims')
+          .update(updates)
+          .eq('id', claimId)
+          .select()
+          .single();
+
+      final updatedClaimModel = ClaimModel.fromJson(response);
       final updatedClaim = updatedClaimModel.toEntity();
 
       // Mettre à jour le cache
       await localDataSource.cacheClaim(updatedClaimModel);
 
       return Right(updatedClaim);
-    } on DioException catch (e) {
-      return Left(_handleDioException(e));
+    } on PostgrestException catch (e) {
+      return Left(_handlePostgrestException(e));
     } catch (e) {
       return Left(Failure.unknown(message: 'Failed to update claim: $e'));
     }
@@ -217,51 +253,56 @@ class ClaimRepositoryImpl implements ClaimRepository {
     return errors;
   }
 
-  Failure _handleDioException(DioException e) {
-    switch (e.type) {
-      case DioExceptionType.connectionTimeout:
-      case DioExceptionType.receiveTimeout:
-      case DioExceptionType.sendTimeout:
-        return Failure.timeout(
-          message: 'Request timeout',
-          duration: Duration(milliseconds: e.requestOptions.connectTimeout ?? 0),
+  Failure _handlePostgrestException(PostgrestException e) {
+    // Handle specific Postgrest error codes
+    switch (e.code) {
+      case 'PGRST116': // No rows found (404 equivalent)
+        return Failure.notFound(
+          message: 'Claim not found',
+          resource: 'claim',
         );
-      case DioExceptionType.badResponse:
-        final statusCode = e.response?.statusCode;
-        if (statusCode == 404) {
-          return Failure.notFound(
-            message: 'Claim not found',
-            resource: 'claim',
-          );
-        } else if (statusCode == 401) {
+      case 'PGRST301': // JSON parse error
+        return Failure.validation(
+          message: 'Invalid data format',
+          fieldErrors: {'format': 'Invalid JSON data'},
+        );
+      case '23505': // Unique constraint violation
+        return Failure.validation(
+          message: e.message,
+          fieldErrors: {'unique': 'Duplicate entry'},
+        );
+      case '23503': // Foreign key constraint violation
+        return Failure.validation(
+          message: e.message,
+          fieldErrors: {'reference': 'Referenced record not found'},
+        );
+      case '23502': // Not null constraint violation
+        return Failure.validation(
+          message: e.message,
+          fieldErrors: {'required': 'Required field missing'},
+        );
+      case '23514': // Check constraint violation
+        return Failure.validation(
+          message: e.message,
+          fieldErrors: {'validation': 'Data validation failed'},
+        );
+      default:
+        // Check HTTP status codes for other errors
+        if (e.message.contains('401') || e.message.contains('Unauthorized')) {
           return const Failure.unauthorized(message: 'Authentication required');
-        } else if (statusCode == 400) {
-          return Failure.validation(
-            message: e.response?.data?['message'] ?? 'Validation error',
-            fieldErrors: e.response?.data?['field_errors'],
+        } else if (e.message.contains('403') || e.message.contains('Forbidden')) {
+          return const Failure.unauthorized(message: 'Access denied');
+        } else if (e.message.contains('500') || e.message.contains('Internal')) {
+          return Failure.server(
+            message: 'Server error occurred',
+            statusCode: 500,
           );
         } else {
-          return Failure.server(
-            message: e.response?.data?['message'] ?? 'Server error',
-            statusCode: statusCode,
-            endpoint: e.requestOptions.path,
+          return Failure.unknown(
+            message: e.message,
+            originalError: e,
           );
         }
-      case DioExceptionType.connectionError:
-        return Failure.network(
-          message: 'Network connection error',
-          endpoint: e.requestOptions.path,
-        );
-      case DioExceptionType.cancel:
-        return const Failure.unknown(message: 'Request was cancelled');
-      case DioExceptionType.badCertificate:
-        return const Failure.network(message: 'Certificate verification failed');
-      case DioExceptionType.unknown:
-      default:
-        return Failure.unknown(
-          message: e.message ?? 'Unknown error occurred',
-          originalError: e,
-        );
     }
   }
 }

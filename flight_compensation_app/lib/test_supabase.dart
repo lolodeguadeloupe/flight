@@ -57,9 +57,61 @@ class _TestSupabasePageState extends State<TestSupabasePage> {
     });
 
     try {
+      print('🔍 Testing table structure first...');
+      
+      // D'abord, essayer de récupérer un enregistrement pour voir la structure
+      try {
+        final existing = await SupabaseConfig.from('claims').select().limit(1);
+        print('✅ Table claims exists. Sample: $existing');
+      } catch (e) {
+        print('⚠️ No existing records or table issue: $e');
+      }
+      
+      print('📝 Attempting insert...');
+      
+      // D'abord, vérifier si nous avons un utilisateur connecté
+      final currentUser = SupabaseConfig.auth.currentUser;
+      if (currentUser == null) {
+        print('⚠️ No authenticated user, creating test user...');
+        
+        // Créer un utilisateur de test temporaire
+        final testEmail = 'test-${DateTime.now().millisecondsSinceEpoch}@test.com';
+        final testPassword = 'TestPassword123!';
+        
+        try {
+          final authResponse = await SupabaseConfig.auth.signUp(
+            email: testEmail,
+            password: testPassword,
+          );
+          
+          if (authResponse.user != null) {
+            print('✅ Test user created: ${authResponse.user!.id}');
+          } else {
+            throw Exception('Failed to create test user');
+          }
+        } catch (authError) {
+          setState(() {
+            _status = 'Erreur création utilisateur test: $authError';
+          });
+          return;
+        }
+      }
+      
+      final userId = SupabaseConfig.auth.currentUser?.id;
+      if (userId == null) {
+        setState(() {
+          _status = 'Impossible d\'obtenir l\'ID utilisateur';
+        });
+        return;
+      }
+      
+      print('📝 Attempting insert with user ID: $userId');
+      
+      // Essayer l'insertion avec un user_id valide
       final response = await SupabaseConfig.from('claims').insert({
+        'user_id': userId,
         'flight_number': 'TEST123',
-        'departure_date': '01/01/2024',
+        'departure_date': '2024-01-01', // Format ISO
         'departure_airport': 'CDG',
         'arrival_airport': 'JFK',
         'delay_duration': 4,
@@ -67,14 +119,32 @@ class _TestSupabasePageState extends State<TestSupabasePage> {
         'passenger_name': 'Test User',
         'passenger_email': 'test@test.com',
         'estimated_compensation': 600.0,
-      }).select().single();
+        'status': 'DRAFT',
+      }).select();
+      
+      print('✅ Insert successful: $response');
       
       setState(() {
-        _status = 'Insertion réussie! ID: ${response['id']}';
+        _status = 'Insertion réussie! Données: $response';
       });
     } catch (error) {
+      print('❌ Insert failed: $error');
+      
+      // Analyser le type d'erreur
+      String errorMessage = 'Erreur insertion: $error';
+      
+      if (error.toString().contains('relation "claims" does not exist')) {
+        errorMessage = 'Table "claims" n\'existe pas dans la base de données';
+      } else if (error.toString().contains('column') && error.toString().contains('does not exist')) {
+        errorMessage = 'Colonne manquante dans la table claims: $error';
+      } else if (error.toString().contains('violates not-null constraint')) {
+        errorMessage = 'Champ obligatoire manquant: $error';
+      } else if (error.toString().contains('permission denied')) {
+        errorMessage = 'Permissions insuffisantes pour insérer dans la table claims';
+      }
+      
       setState(() {
-        _status = 'Erreur insertion: $error';
+        _status = errorMessage;
       });
     } finally {
       setState(() {
@@ -90,35 +160,118 @@ class _TestSupabasePageState extends State<TestSupabasePage> {
     });
 
     try {
-      final dio = Dio();
-      
-      // Test 1: Ping de base
+      // Utiliser le client Supabase au lieu de Dio direct
       print('🏥 Testing health check...');
-      final response = await dio.get('https://flight-supabase.laurent-luce.com/rest/v1/');
       
-      print('Health check response: ${response.statusCode}');
-      print('Headers: ${response.headers}');
+      // Test simple: essayer d'accéder à une table système ou faire un ping simple
+      final response = await SupabaseConfig.from('claims').select('count').count();
+      
+      print('Health check response - can access DB: ${response.count}');
       
       setState(() {
-        _status = 'Health check réussi! Status: ${response.statusCode}';
+        _status = 'Health check réussi! Base de données accessible.';
       });
     } catch (error) {
       print('❌ Health check failed: $error');
       
-      // Test si c'est un problème de CORS ou d'URL
-      if (error.toString().contains('XMLHttpRequest')) {
+      setState(() {
+        _status = 'Erreur health check: $error';
+      });
+    } finally {
+      setState(() {
+        _testing = false;
+      });
+    }
+  }
+
+  Future<void> _testTableStructure() async {
+    setState(() {
+      _testing = true;
+      _status = 'Vérification structure DB...';
+    });
+
+    try {
+      print('🔍 Checking database structure...');
+      
+      // Essayer de lister les tables via une requête d'information
+      // Note: Cela peut nécessiter des permissions spéciales
+      try {
+        final tablesInfo = await SupabaseConfig.client.rpc('get_table_info');
+        print('📋 Tables info: $tablesInfo');
+        
         setState(() {
-          _status = 'Erreur CORS - Vérifiez les domaines autorisés dans Supabase';
+          _status = 'Tables trouvées: $tablesInfo';
         });
-      } else if (error.toString().contains('Failed to fetch')) {
+      } catch (e) {
+        print('⚠️ Cannot get table info via RPC: $e');
+        
+        // Alternative: essayer de faire un SELECT sur différentes tables
+        final List<String> tablesToCheck = ['claims', 'users', 'flights', 'documents'];
+        final Map<String, String> tableStatus = {};
+        
+        for (String table in tablesToCheck) {
+          try {
+            await SupabaseConfig.from(table).select('*').limit(0);
+            tableStatus[table] = '✅ Existe';
+          } catch (e) {
+            if (e.toString().contains('does not exist')) {
+              tableStatus[table] = '❌ N\'existe pas';
+            } else if (e.toString().contains('permission denied')) {
+              tableStatus[table] = '🔒 Permission refusée';
+            } else {
+              tableStatus[table] = '⚠️ Erreur: ${e.toString().substring(0, 50)}...';
+            }
+          }
+        }
+        
         setState(() {
-          _status = 'URL inaccessible - Vérifiez que le serveur Supabase est en ligne';
-        });
-      } else {
-        setState(() {
-          _status = 'Erreur health check: $error';
+          _status = 'Status des tables:\n${tableStatus.entries.map((e) => '${e.key}: ${e.value}').join('\n')}';
         });
       }
+      
+    } catch (error) {
+      print('❌ Structure check failed: $error');
+      
+      setState(() {
+        _status = 'Erreur vérification structure: $error';
+      });
+    } finally {
+      setState(() {
+        _testing = false;
+      });
+    }
+  }
+
+  Future<void> _cleanupTestData() async {
+    setState(() {
+      _testing = true;
+      _status = 'Nettoyage des données test...';
+    });
+
+    try {
+      print('🧹 Cleaning up test data...');
+      
+      // Supprimer les réclamations de test
+      final deleteResult = await SupabaseConfig.from('claims')
+          .delete()
+          .match({'flight_number': 'TEST123'});
+      
+      print('✅ Deleted test claims');
+      
+      // Optionnel: supprimer les utilisateurs de test (nécessite des permissions admin)
+      // Pour l'instant, on se contente de se déconnecter
+      await SupabaseConfig.auth.signOut();
+      
+      setState(() {
+        _status = 'Nettoyage terminé. Données test supprimées et utilisateur déconnecté.';
+      });
+      
+    } catch (error) {
+      print('❌ Cleanup failed: $error');
+      
+      setState(() {
+        _status = 'Erreur lors du nettoyage: $error';
+      });
     } finally {
       setState(() {
         _testing = false;
@@ -169,6 +322,17 @@ class _TestSupabasePageState extends State<TestSupabasePage> {
             ElevatedButton(
               onPressed: _testing ? null : _testHealthCheck,
               child: const Text('Health Check API'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: _testing ? null : _testTableStructure,
+              child: const Text('Vérifier structure DB'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: _testing ? null : _cleanupTestData,
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+              child: const Text('Nettoyer données test'),
             ),
           ],
         ),

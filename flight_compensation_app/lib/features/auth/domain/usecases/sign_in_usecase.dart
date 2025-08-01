@@ -13,11 +13,11 @@ class SignInUseCase {
     required String password,
   }) async {
     if (email.isEmpty || password.isEmpty) {
-      return Left(ValidationFailure('Email and password cannot be empty'));
+      return Left(Failure.validation(message: 'Email and password cannot be empty'));
     }
 
     if (!_isValidEmail(email)) {
-      return Left(ValidationFailure('Invalid email format'));
+      return Left(Failure.validation(message: 'Invalid email format'));
     }
 
     return await repository.signInWithEmail(

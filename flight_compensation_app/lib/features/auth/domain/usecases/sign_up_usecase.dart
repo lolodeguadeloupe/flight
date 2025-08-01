@@ -37,24 +37,24 @@ class SignUpUseCase {
     required String confirmPassword,
   }) {
     if (email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
-      return Left(ValidationFailure('All fields are required'));
+      return Left(Failure.validation(message: 'All fields are required'));
     }
 
     if (!_isValidEmail(email)) {
-      return Left(ValidationFailure('Invalid email format'));
+      return Left(Failure.validation(message: 'Invalid email format'));
     }
 
     if (password.length < 8) {
-      return Left(ValidationFailure('Password must be at least 8 characters'));
+      return Left(Failure.validation(message: 'Password must be at least 8 characters'));
     }
 
     if (password != confirmPassword) {
-      return Left(ValidationFailure('Passwords do not match'));
+      return Left(Failure.validation(message: 'Passwords do not match'));
     }
 
     if (!_isStrongPassword(password)) {
-      return Left(ValidationFailure(
-        'Password must contain at least one uppercase letter, one lowercase letter, and one number'
+      return Left(Failure.validation(
+        message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number'
       ));
     }
 
