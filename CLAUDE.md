@@ -376,3 +376,8 @@ PostgreSQL + Storage + Auth
 ```
 
 This architecture allows for a rapid start with Supabase direct, progressively adding complexity via Edge Functions based on business needs.
+
+## Docker Deployment
+
+### Development Workflow Recommendation
+- **Il faut utiliser plutot docker compose**

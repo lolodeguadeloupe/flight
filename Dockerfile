@@ -2,7 +2,7 @@
 # Optimized for Coolify deployment
 
 # Stage 1: Build Environment
-FROM ghcr.io/cirruslabs/flutter:3.24.0 AS builder
+FROM ghcr.io/cirruslabs/flutter:stable AS builder
 
 # Set working directory
 WORKDIR /app
