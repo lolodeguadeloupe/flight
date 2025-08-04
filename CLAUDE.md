@@ -342,6 +342,37 @@ class ClaimFormNotifier extends AutoDisposeAsyncNotifier<ClaimFormState> {
 
 ---
 
+## Scripts de Développement
+
+### Script Git Worktree + VS Code
+
+Le script `git-worktree-vscode.sh` permet de créer facilement un environnement de développement parallèle :
+
+```bash
+# Utilisation
+./git-worktree-vscode.sh <nom-de-branche>
+
+# Exemples
+./git-worktree-vscode.sh feature-payment-integration
+./git-worktree-vscode.sh bugfix-scanner-crash
+./git-worktree-vscode.sh refactor-claim-form
+```
+
+**Ce que fait le script :**
+- Crée un nouveau worktree Git dans `../flight-mobile-<nom-branche>`
+- Crée une nouvelle branche avec le nom spécifié
+- Navigue vers le nouveau dossier
+- Ouvre VS Code dans ce dossier
+- Fournit des commandes utiles pour la gestion des worktrees
+
+**Avantages :**
+- Travail en parallèle sur plusieurs fonctionnalités
+- Isolation complète entre les environnements
+- Partage de l'historique Git
+- Basculement rapide entre les tâches
+
+---
+
 *This application implements a comprehensive solution for flight compensation claims with focus on user experience, legal compliance, and technical excellence.*
 
 ## Supabase Architecture for FlightClaim

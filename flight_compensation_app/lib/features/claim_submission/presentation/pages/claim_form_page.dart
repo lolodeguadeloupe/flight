@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/network/supabase_client.dart';
+import '../providers/claim_form_provider.dart';
+import '../../domain/entities/claim_form_step.dart';
 
 class ClaimFormPage extends ConsumerStatefulWidget {
   const ClaimFormPage({super.key});
@@ -13,9 +15,7 @@ class ClaimFormPage extends ConsumerStatefulWidget {
 
 class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
   final _formKey = GlobalKey<FormState>();
-  int _currentStep = 0;
-  final int _totalSteps = 4;
-
+  
   // Form controllers
   final _flightNumberController = TextEditingController();
   final _departureDateController = TextEditingController();
@@ -28,8 +28,14 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
   final _passengerPhoneController = TextEditingController();
   final _passengerAddressController = TextEditingController();
 
-  bool _isSubmitting = false;
-  double? _estimatedCompensation;
+  String? _userId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeForm();
+    _setupControllerListeners();
+  }
 
   @override
   void dispose() {
@@ -46,98 +52,275 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
     super.dispose();
   }
 
+  void _initializeForm() async {
+    // Récupérer l'utilisateur actuel ou créer un utilisateur temporaire
+    var currentUser = SupabaseConfig.auth.currentUser;
+    if (currentUser == null) {
+      // Pour les tests, créer un utilisateur temporaire
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final tempEmail = 'temp_$timestamp@example.com';
+      
+      try {
+        final authResponse = await SupabaseConfig.auth.signUp(
+          email: tempEmail,
+          password: 'TempPassword123!',
+        );
+        currentUser = authResponse.user;
+      } catch (e) {
+        // Si l'inscription échoue, utiliser un ID temporaire
+        _userId = 'temp_$timestamp';
+      }
+    }
+    
+    if (currentUser != null) {
+      _userId = currentUser.id;
+    }
+
+    // Initialiser le formulaire
+    if (_userId != null) {
+      await ref.read(claimFormProvider.notifier).initializeForm(_userId!);
+    }
+  }
+
+  void _setupControllerListeners() {
+    // Écouter les changements pour sauvegarder automatiquement
+    _flightNumberController.addListener(() => _updateStepData(0));
+    _departureDateController.addListener(() => _updateStepData(0));
+    _departureAirportController.addListener(() => _updateStepData(0));
+    _arrivalAirportController.addListener(() => _updateStepData(0));
+    
+    _delayDurationController.addListener(() => _updateStepData(1));
+    _delayReasonController.addListener(() => _updateStepData(1));
+    
+    _passengerNameController.addListener(() => _updateStepData(2));
+    _passengerEmailController.addListener(() => _updateStepData(2));
+    _passengerPhoneController.addListener(() => _updateStepData(2));
+    _passengerAddressController.addListener(() => _updateStepData(2));
+  }
+
+  void _updateStepData(int stepIndex) {
+    Map<String, dynamic> data = {};
+    
+    switch (stepIndex) {
+      case 0: // Flight info
+        data = {
+          'flight_number': _flightNumberController.text.toUpperCase(),
+          'departure_date': _departureDateController.text,
+          'departure_airport': _departureAirportController.text.toUpperCase(),
+          'arrival_airport': _arrivalAirportController.text.toUpperCase(),
+        };
+        break;
+      case 1: // Delay info
+        data = {
+          'delay_duration': _delayDurationController.text,
+          'delay_reason': _delayReasonController.text,
+        };
+        break;
+      case 2: // Passenger info
+        data = {
+          'passenger_name': _passengerNameController.text,
+          'passenger_email': _passengerEmailController.text,
+          'passenger_phone': _passengerPhoneController.text,
+          'passenger_address': _passengerAddressController.text,
+        };
+        break;
+    }
+    
+    // Debounce la sauvegarde pour éviter trop d'appels
+    Future.delayed(const Duration(milliseconds: 500), () {
+      ref.read(claimFormProvider.notifier).updateStepData(stepIndex, data);
+    });
+  }
+
+  void _populateControllers(Map<String, dynamic> data) {
+    if (data.isNotEmpty) {
+      _flightNumberController.text = data['flight_number'] ?? '';
+      _departureDateController.text = data['departure_date'] ?? '';
+      _departureAirportController.text = data['departure_airport'] ?? '';
+      _arrivalAirportController.text = data['arrival_airport'] ?? '';
+      _delayDurationController.text = data['delay_duration'] ?? '';
+      _delayReasonController.text = data['delay_reason'] ?? '';
+      _passengerNameController.text = data['passenger_name'] ?? '';
+      _passengerEmailController.text = data['passenger_email'] ?? '';
+      _passengerPhoneController.text = data['passenger_phone'] ?? '';
+      _passengerAddressController.text = data['passenger_address'] ?? '';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final formState = ref.watch(claimFormProvider);
+    final completionPercentage = ref.watch(formCompletionProvider);
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nouvelle réclamation'),
         elevation: 0,
         backgroundColor: Theme.of(context).primaryColor,
         foregroundColor: Colors.white,
+        actions: [
+          // Indicateur de sauvegarde
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: formState.when(
+              data: (state) => state.lastSaved != null
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.cloud_done, size: 20),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Sauvé',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const SizedBox.shrink(),
+              loading: () => const CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+              error: (_, __) => const Icon(Icons.error, color: Colors.red),
+            ),
+          ),
+        ],
       ),
-      body: Column(
+      body: formState.when(
+        data: (state) => Column(
+          children: [
+            _buildProgressIndicator(state, completionPercentage),
+            Expanded(
+              child: IndexedStack(
+                index: state.currentStep,
+                children: [
+                  _buildFlightInfoStep(state),
+                  _buildDelayInfoStep(state),
+                  _buildPassengerInfoStep(state),
+                  _buildSummaryStep(state),
+                ],
+              ),
+            ),
+            _buildNavigationButtons(state),
+          ],
+        ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              Text('Erreur: $error'),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => _initializeForm(),
+                child: const Text('Réessayer'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProgressIndicator(ClaimFormState state, double completionPercentage) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.grey[50],
+      child: Column(
         children: [
-          _buildProgressIndicator(),
-          Expanded(
-            child: IndexedStack(
-              index: _currentStep,
-              children: [
-                _buildFlightInfoStep(),
-                _buildDelayInfoStep(),
-                _buildPassengerInfoStep(),
-                _buildSummaryStep(),
-              ],
-            ),
+          // Barre de progression globale
+          Row(
+            children: [
+              Expanded(
+                child: LinearProgressIndicator(
+                  value: completionPercentage / 100,
+                  backgroundColor: Colors.grey[300],
+                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).primaryColor),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '${completionPercentage.toInt()}%',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
           ),
-          // Debug: Always show buttons
-          Container(
-            height: 80,
-            color: Colors.red[50],
-            child: Center(
-              child: Text('Navigation Area - Step $_currentStep', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
+          const SizedBox(height: 16),
+          // Indicateurs d'étapes
+          Row(
+            children: List.generate(state.steps.length, (index) {
+              final step = state.steps[index];
+              final isActive = index == state.currentStep;
+              final isCompleted = step.isCompleted;
+          
+              return Expanded(
+                child: Container(
+                  margin: EdgeInsets.only(right: index < state.steps.length - 1 ? 8 : 0),
+                  child: Column(
+                    children: [
+                      Container(
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isCompleted 
+                              ? Colors.green 
+                              : isActive 
+                                  ? Theme.of(context).primaryColor 
+                                  : step.hasErrors
+                                      ? Colors.red[300]
+                                      : Colors.grey[300],
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (isCompleted)
+                            const Icon(Icons.check_circle, size: 16, color: Colors.green)
+                          else if (step.hasErrors)
+                            const Icon(Icons.error, size: 16, color: Colors.red),
+                          if (isCompleted || step.hasErrors) const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              step.stepTitle,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                                color: isCompleted 
+                                    ? Colors.green
+                                    : isActive 
+                                        ? Theme.of(context).primaryColor 
+                                        : step.hasErrors
+                                            ? Colors.red
+                                            : Colors.grey[600],
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
           ),
-          _buildNavigationButtons(),
         ],
       ),
     );
   }
 
-  Widget _buildProgressIndicator() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.grey[50],
-      child: Row(
-        children: List.generate(_totalSteps, (index) {
-          final isActive = index == _currentStep;
-          final isCompleted = index < _currentStep;
-          
-          return Expanded(
-            child: Container(
-              margin: EdgeInsets.only(right: index < _totalSteps - 1 ? 8 : 0),
-              child: Column(
-                children: [
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: isCompleted || isActive 
-                          ? Theme.of(context).primaryColor 
-                          : Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _getStepTitle(index),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                      color: isCompleted || isActive 
-                          ? Theme.of(context).primaryColor 
-                          : Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
+  Widget _buildFlightInfoStep(ClaimFormState state) {
+    final stepData = state.steps[0];
+    final stepErrors = stepData.errors;
+    // Populer les contrôleurs avec les données sauvegardées
+    _populateControllers(stepData.data);
 
-  String _getStepTitle(int index) {
-    switch (index) {
-      case 0: return 'Informations\ndu vol';
-      case 1: return 'Détails\ndu retard';
-      case 2: return 'Informations\npersonnelles';
-      case 3: return 'Récapitulatif';
-      default: return '';
-    }
-  }
-
-  Widget _buildFlightInfoStep() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Form(
@@ -155,6 +338,41 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
               style: TextStyle(fontSize: 16, color: Colors.grey),
             ),
             const SizedBox(height: 24),
+
+            // Affichage des erreurs de l'étape
+            if (stepErrors.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  border: Border.all(color: Colors.red[200]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.error, color: Colors.red[700], size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Erreurs dans cette étape:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ...stepErrors.map((error) => Text(
+                      '• ${error.message}',
+                      style: TextStyle(color: Colors.red[700]),
+                    )),
+                  ],
+                ),
+              ),
             
             _buildTextField(
               controller: _flightNumberController,
@@ -248,7 +466,10 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
     );
   }
 
-  Widget _buildDelayInfoStep() {
+  Widget _buildDelayInfoStep(ClaimFormState state) {
+    final stepData = state.steps[1];
+    final stepErrors = stepData.errors;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -264,6 +485,41 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
             style: TextStyle(fontSize: 16, color: Colors.grey),
           ),
           const SizedBox(height: 24),
+
+          // Affichage des erreurs
+          if (stepErrors.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                border: Border.all(color: Colors.red[200]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.error, color: Colors.red[700], size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Erreurs dans cette étape:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ...stepErrors.map((error) => Text(
+                    '• ${error.message}',
+                    style: TextStyle(color: Colors.red[700]),
+                  )),
+                ],
+              ),
+            ),
           
           _buildTextField(
             controller: _delayDurationController,
@@ -305,7 +561,7 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
           
           const SizedBox(height: 24),
           
-          if (_estimatedCompensation != null)
+          if (state.estimatedCompensation != null)
             Card(
               color: Colors.green[50],
               child: Padding(
@@ -325,7 +581,7 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
                           ),
                         ),
                         Text(
-                          '${_estimatedCompensation!.toStringAsFixed(0)} €',
+                          '${state.estimatedCompensation!.toStringAsFixed(0)} €',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -343,7 +599,10 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
     );
   }
 
-  Widget _buildPassengerInfoStep() {
+  Widget _buildPassengerInfoStep(ClaimFormState state) {
+    final stepData = state.steps[2];
+    final stepErrors = stepData.errors;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -359,6 +618,41 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
             style: TextStyle(fontSize: 16, color: Colors.grey),
           ),
           const SizedBox(height: 24),
+
+          // Affichage des erreurs
+          if (stepErrors.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                border: Border.all(color: Colors.red[200]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.error, color: Colors.red[700], size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Erreurs dans cette étape:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ...stepErrors.map((error) => Text(
+                    '• ${error.message}',
+                    style: TextStyle(color: Colors.red[700]),
+                  )),
+                ],
+              ),
+            ),
           
           _buildTextField(
             controller: _passengerNameController,
@@ -427,7 +721,9 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
     );
   }
 
-  Widget _buildSummaryStep() {
+  Widget _buildSummaryStep(ClaimFormState state) {
+    final allData = state.allFormData;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -445,29 +741,29 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
           const SizedBox(height: 24),
           
           _buildSummaryCard('Informations du vol', [
-            'Vol: ${_flightNumberController.text}',
-            'Date: ${_departureDateController.text}',
-            'De: ${_departureAirportController.text}',
-            'Vers: ${_arrivalAirportController.text}',
+            'Vol: ${allData['flight_number'] ?? ''}',
+            'Date: ${allData['departure_date'] ?? ''}',
+            'De: ${allData['departure_airport'] ?? ''}',
+            'Vers: ${allData['arrival_airport'] ?? ''}',
           ]),
           
           const SizedBox(height: 16),
           
           _buildSummaryCard('Détails du retard', [
-            'Durée: ${_delayDurationController.text} heures',
-            'Raison: ${_delayReasonController.text}',
-            if (_estimatedCompensation != null)
-              'Indemnisation estimée: ${_estimatedCompensation!.toStringAsFixed(0)} €',
+            'Durée: ${allData['delay_duration'] ?? ''} heures',
+            'Raison: ${allData['delay_reason'] ?? ''}',
+            if (state.estimatedCompensation != null)
+              'Indemnisation estimée: ${state.estimatedCompensation!.toStringAsFixed(0)} €',
           ]),
           
           const SizedBox(height: 16),
           
           _buildSummaryCard('Informations personnelles', [
-            'Nom: ${_passengerNameController.text}',
-            'Email: ${_passengerEmailController.text}',
-            if (_passengerPhoneController.text.isNotEmpty)
-              'Téléphone: ${_passengerPhoneController.text}',
-            'Adresse: ${_passengerAddressController.text}',
+            'Nom: ${allData['passenger_name'] ?? ''}',
+            'Email: ${allData['passenger_email'] ?? ''}',
+            if (allData['passenger_phone']?.isNotEmpty == true)
+              'Téléphone: ${allData['passenger_phone']}',
+            'Adresse: ${allData['passenger_address'] ?? ''}',
           ]),
           
           const SizedBox(height: 24),
@@ -573,8 +869,7 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
     );
   }
 
-  Widget _buildNavigationButtons() {
-    print('Building navigation buttons - Current step: $_currentStep');
+  Widget _buildNavigationButtons(ClaimFormState state) {
     return SafeArea(
       child: Container(
         width: double.infinity,
@@ -593,106 +888,112 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
             ),
           ],
         ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          if (_currentStep > 0)
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            if (state.canGoBack)
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => ref.read(claimFormProvider.notifier).previousStep(),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text('Précédent'),
+                ),
+              )
+            else
+              const Expanded(child: SizedBox()),
+            const SizedBox(width: 16),
             Expanded(
-              child: OutlinedButton(
-                onPressed: _previousStep,
-                style: OutlinedButton.styleFrom(
+              child: ElevatedButton(
+                onPressed: state.isSubmitting 
+                    ? null 
+                    : state.currentStep == state.steps.length - 1
+                        ? _submitClaim
+                        : state.canProceedToNext
+                            ? () => ref.read(claimFormProvider.notifier).nextStep()
+                            : null,
+                style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text('Précédent'),
-              ),
-            )
-          else
-            const Expanded(child: SizedBox()),
-          const SizedBox(width: 16),
-          Expanded(
-            child: ElevatedButton(
-              onPressed: _isSubmitting ? null : _nextStep,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: _isSubmitting
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                child: state.isSubmitting
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : Text(
+                        state.currentStep == state.steps.length - 1 ? 'Soumettre' : 'Suivant',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
-                    )
-                  : Text(
-                      _currentStep == _totalSteps - 1 ? 'Soumettre' : 'Suivant',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
 
-  void _previousStep() {
-    if (_currentStep > 0) {
-      setState(() {
-        _currentStep--;
-      });
+  Future<void> _submitClaim() async {
+    final result = await ref.read(claimFormProvider.notifier).submitClaim();
+    
+    if (mounted) {
+      result.fold(
+        (failure) => showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            icon: const Icon(Icons.error, color: Colors.red, size: 48),
+            title: const Text('Erreur'),
+            content: Text('Impossible de soumettre la réclamation: ${failure.message}'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        ),
+        (claimId) => showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            icon: const Icon(Icons.check_circle, color: Colors.green, size: 48),
+            title: const Text('Réclamation soumise !'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Votre réclamation a été soumise avec succès.'),
+                const SizedBox(height: 8),
+                Text(
+                  'Numéro de réclamation: $claimId',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text('Vous recevrez un email de confirmation.'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).pop();
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
-  }
-
-  void _nextStep() {
-    if (_currentStep < _totalSteps - 1) {
-      if (_validateCurrentStep()) {
-        setState(() {
-          _currentStep++;
-        });
-      }
-    } else {
-      _submitClaim();
-    }
-  }
-
-  bool _validateCurrentStep() {
-    switch (_currentStep) {
-      case 0:
-        return _validateFlightInfo();
-      case 1:
-        return _validateDelayInfo();
-      case 2:
-        return _validatePassengerInfo();
-      default:
-        return true;
-    }
-  }
-
-  bool _validateFlightInfo() {
-    return _flightNumberController.text.isNotEmpty &&
-           _departureDateController.text.isNotEmpty &&
-           _departureAirportController.text.length == 3 &&
-           _arrivalAirportController.text.length == 3;
-  }
-
-  bool _validateDelayInfo() {
-    final duration = double.tryParse(_delayDurationController.text);
-    return duration != null && 
-           duration >= 3 && 
-           _delayReasonController.text.isNotEmpty;
-  }
-
-  bool _validatePassengerInfo() {
-    return _passengerNameController.text.trim().split(' ').length >= 2 &&
-           RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_passengerEmailController.text) &&
-           _passengerAddressController.text.isNotEmpty;
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -710,134 +1011,6 @@ class _ClaimFormPageState extends ConsumerState<ClaimFormPage> {
     }
   }
 
-  void _calculateCompensation() {
-    final duration = double.tryParse(_delayDurationController.text);
-    if (duration != null && duration >= 3) {
-      setState(() {
-        // Calcul simplifié basé sur EC261
-        if (duration >= 4) {
-          _estimatedCompensation = 600.0; // Long courrier
-        } else {
-          _estimatedCompensation = 400.0; // Moyen courrier
-        }
-      });
-    } else {
-      setState(() {
-        _estimatedCompensation = null;
-      });
-    }
-  }
-
-  Future<void> _submitClaim() async {
-    if (!_validateCurrentStep()) return;
-
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    try {
-      // Vérifier ou créer un utilisateur
-      var currentUser = SupabaseConfig.auth.currentUser;
-      if (currentUser == null) {
-        // Créer un utilisateur temporaire pour le test
-        final authResponse = await SupabaseConfig.auth.signUp(
-          email: _passengerEmailController.text,
-          password: 'TempPassword123!',
-        );
-        currentUser = authResponse.user;
-      }
-
-      if (currentUser == null) {
-        throw Exception('Impossible de créer ou récupérer l\'utilisateur');
-      }
-
-      // Insérer la réclamation
-      final claimData = {
-        'user_id': currentUser.id,
-        'flight_number': _flightNumberController.text.toUpperCase(),
-        'departure_date': DateFormat('yyyy-MM-dd').format(
-          DateFormat('dd/MM/yyyy').parse(_departureDateController.text)
-        ),
-        'departure_airport': _departureAirportController.text.toUpperCase(),
-        'arrival_airport': _arrivalAirportController.text.toUpperCase(),
-        'delay_duration': double.parse(_delayDurationController.text).round(),
-        'delay_reason': _delayReasonController.text,
-        'passenger_name': _passengerNameController.text,
-        'passenger_email': _passengerEmailController.text,
-        'passenger_phone': _passengerPhoneController.text.isNotEmpty 
-            ? _passengerPhoneController.text 
-            : null,
-        'passenger_address': _passengerAddressController.text,
-        'estimated_compensation': _estimatedCompensation,
-        'status': 'SUBMITTED',
-        'submitted_at': DateTime.now().toIso8601String(),
-      };
-
-      final response = await SupabaseConfig.from('claims')
-          .insert(claimData)
-          .select()
-          .single();
-
-      // Afficher le succès
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            icon: const Icon(Icons.check_circle, color: Colors.green, size: 48),
-            title: const Text('Réclamation soumise !'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Votre réclamation a été soumise avec succès.'),
-                const SizedBox(height: 8),
-                Text(
-                  'Numéro de réclamation: ${response['id']}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text('Vous recevrez un email de confirmation.'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).pop();
-                },
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
-
-    } catch (error) {
-      // Afficher l'erreur
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            icon: const Icon(Icons.error, color: Colors.red, size: 48),
-            title: const Text('Erreur'),
-            content: Text('Impossible de soumettre la réclamation: $error'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
-    }
-  }
 }
 
 class UpperCaseTextFormatter extends TextInputFormatter {

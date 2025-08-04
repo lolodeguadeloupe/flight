@@ -9,6 +9,8 @@
 /android/app/debug
 /android/app/profile
 /android/app/release
+/flight-mobile-connection
+/mobile
 
 # IDE files
 .vscode/
@@ -27,4 +29,3 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-/mobile
